@@ -3,12 +3,10 @@
 #include <stdint.h>
 
 #include "32blit.hpp"
+#include "assets.hpp"
 
 void init();
 void update(uint32_t time);
 void render(uint32_t time);
-
-extern const char _binary_level_start[];
-extern const char _binary_sprites_start[];
 
 void update_camera();

@@ -37,11 +37,11 @@ void init() {
   set_screen_mode(ScreenMode::lores);
 
   // Load the spritesheet from the linked binary blob
-  screen.sprites = SpriteSheet::load((const uint8_t *)_binary_sprites_start);
+  screen.sprites = SpriteSheet::load((const uint8_t *)asset_sprites_png.data);
 
   // Load the level data from the linked binary blob
   // Note: This will be const! Should probably copy the level data to a local array first
-  level = new TileMap((uint8_t *)_binary_level_start, nullptr, Size(level_width, level_height), screen.sprites);
+  level = new TileMap((uint8_t *)asset_level.data, nullptr, Size(level_width, level_height), screen.sprites);
 }
 
 void render(uint32_t time_ms) {
