@@ -21,7 +21,12 @@ constexpr uint16_t level_height = 64;
 uint8_t *level_data;
 
 Timer timer_level_update;
+Timer timer_level_animate;
 TileMap* level;
+
+struct Feedback {
+  bool rock_thunk;
+};
 
 struct Player {
   Point start;
@@ -30,19 +35,43 @@ struct Player {
   uint32_t score;
   Vec2 camera;
   Point size = Point(1, 1);
+  bool has_key;
+  uint32_t level;
+  bool dead;
 };
 
 Player player;
 
+Feedback feedback;
+
 Mat3 camera;
 
 enum entityType {
+  // Terrain
   NOTHING = 0x00,
   DIRT = 0x01,
   WALL = 0x02,
+  STAIRS = 0x03,
+  LOCKED_STAIRS = 0x04,
+
+  // Rocks and diamonds
   ROCK = 0x10,
   DIAMOND = 0x11,
-  PLAYER = 0x30
+
+  // Player animations... or lack thereof
+  PLAYER = 0x30,
+  PLAYER_SQUASHED = 0x3e,
+  PLAYER_DEAD = 0x3f,
+
+  // Collectable entities that aren't diamonds
+  KEY_SILVER = 0x20,
+  KEY_GOLD = 0x21,
+
+  // Animations, ho boy this is ugly!
+  DIRT_ANIM_1 = 0x50,
+  DIRT_ANIM_2 = 0x51,
+  DIRT_ANIM_3 = 0x52,
+  DIRT_ANIM_4 = 0x53,
 };
 
 // Line-interrupt callback for level->draw that applies our camera transformation
@@ -52,6 +81,7 @@ std::function<Mat3(uint8_t)> level_line_interrupt_callback = [](uint8_t y) -> Ma
 };
 
 void update_camera(uint32_t time) {
+  static uint32_t thunk_a_bunch = 0;
   // Create a camera transform that centers around the player's position
   if(player.camera.x < player.position.x) {
     player.camera.x += 0.1;
@@ -66,9 +96,25 @@ void update_camera(uint32_t time) {
     player.camera.y -= 0.1;
   }
 
+  if(feedback.rock_thunk) {
+    thunk_a_bunch = 10;
+    feedback.rock_thunk = 0;
+  }
+
   camera = Mat3::identity();
-  camera *= Mat3::translation(Vec2(player.camera.x * 8.0f, player.camera.y * 8.0f)); // offset to middle of world      
+  camera *= Mat3::translation(Vec2(player.camera.x * 8.0f, player.camera.y * 8.0f)); // offset to middle of world
   camera *= Mat3::translation(Vec2(-screen_width / 2, -screen_height / 2)); // transform to centre of framebuffer
+
+  if(thunk_a_bunch){
+    camera *= Mat3::translation(Vec2(
+      float(random() & 0x03) - 1.5f,
+      float(random() & 0x03) - 1.5f
+    ));
+    thunk_a_bunch--;
+    vibration = thunk_a_bunch / 10.0f;
+  }
+
+
 }
 
 Point level_first(entityType entity) {
@@ -101,6 +147,26 @@ entityType level_get(Point location) {
   return entity;
 }
 
+void animate_level(Timer &timer) {
+  Point location = Point(0, 0);
+  for(location.y = level_height - 1; location.y > 0; location.y--) {
+    for(location.x = 0; location.x < level_width; location.x++) {
+      Point location_below = location + Point(0, 1);
+      entityType current = level_get(location);
+
+      if(current == DIRT_ANIM_4) {
+        level_set(location, NOTHING);
+      } else if(current == DIRT_ANIM_3) {
+        level_set(location, DIRT_ANIM_4);
+      } else if(current == DIRT_ANIM_2) {
+        level_set(location, DIRT_ANIM_3);
+      } else if(current == DIRT_ANIM_1) {
+        level_set(location, DIRT_ANIM_2);
+      }
+    }
+  }
+}
+
 void update_level(Timer &timer) {
   Point location = Point(0, 0);
   for(location.y = level_height - 1; location.y > 0; location.y--) {
@@ -108,27 +174,68 @@ void update_level(Timer &timer) {
       Point location_below = location + Point(0, 1);
       entityType current = level_get(location);
       entityType below = level_get(location_below);
-      if(current == ROCK) {
-        if (below == NOTHING) {
-          level_set(location, NOTHING);
-          level_set(location_below, ROCK);
-        } else if (below == ROCK) {
-          entityType left = level_get(location + Point(-1, 0));
-          entityType below_left = level_get(location + Point(-1, 1));
-          entityType right = level_get(location + Point(1, 0));
-          entityType below_right = level_get(location + Point(1, 1));
 
-          if(left == NOTHING && below_left == NOTHING){
+      for(entityType check_entity : {ROCK, DIAMOND}) {
+        if(current == check_entity) {
+          if (below == NOTHING) {
+            // If the space underneath is empty, fall down
             level_set(location, NOTHING);
-            level_set(location + Point(-1, 1), ROCK);
-          } else if(right == NOTHING && below_right == NOTHING){
+            level_set(location_below, check_entity);
+
+            if(check_entity == ROCK) {
+              // Add a little *THUNK* effect for rocks falling directly down
+              Point location_land = location_below + Point(0, 1);
+              switch (level_get(location_land)) {
+                case WALL:
+                  feedback.rock_thunk = true;
+                  break;
+                case PLAYER:
+                  player.dead = true;
+                  feedback.rock_thunk = true;
+                  level_set(location_land, PLAYER_SQUASHED);
+                default:
+                  break;
+              }
+            }
+          } else if (below == PLAYER_SQUASHED && check_entity == ROCK) {
             level_set(location, NOTHING);
-            level_set(location + Point(1, 1), ROCK);
+            level_set(location_below, PLAYER_DEAD);
+          } else if (below == ROCK || below == DIAMOND) {
+            // If the space below is a rock or a diamond, check to the left/right
+            // and "roll" down the stack
+            entityType left = level_get(location + Point(-1, 0));
+            entityType below_left = level_get(location + Point(-1, 1));
+            entityType right = level_get(location + Point(1, 0));
+            entityType below_right = level_get(location + Point(1, 1));
+
+            if(left == NOTHING && below_left == NOTHING){
+              level_set(location, NOTHING);
+              level_set(location + Point(-1, 1), check_entity);
+            } else if(right == NOTHING && below_right == NOTHING){
+              level_set(location, NOTHING);
+              level_set(location + Point(1, 1), check_entity);
+            }
           }
         }
       }
+
     }
   }
+}
+
+void new_game(uint32_t level) {
+  // Load the level data from the linked binary blob into memory
+  memcpy((void *)level_data, (const void *)asset_level.data, level_width * level_height);
+  player.start = level_first(PLAYER);
+  level_set(player.start, NOTHING);
+  player.position = player.start;
+  player.camera = Vec2(player.position.x, player.position.y);
+  player.has_key = false;
+  player.score = 0;
+  player.dead = false;
+
+  player.screen_location = Point(screen_width / 2, screen_height / 2);
+  player.screen_location += Point(1, 1);
 }
 
 void init() {
@@ -137,23 +244,19 @@ void init() {
   // Load the spritesheet from the linked binary blob
   screen.sprites = SpriteSheet::load((const uint8_t *)asset_sprites.data);
 
-  // Load the level data from the linked binary blob into memory
+  // Allocate memory for the writeable copy of the level
   level_data = (uint8_t *)malloc(level_width * level_height);
-  memcpy((void *)level_data, (const void *)asset_level.data, level_width * level_height);
 
   // Load our level data into the TileMap
   level = new TileMap((uint8_t *)level_data, nullptr, Size(level_width, level_height), screen.sprites);
-
-  player.start = level_first(PLAYER);
-  level_set(player.start, NOTHING);
-  player.position.x = player.start.x;
-  player.position.y = player.start.y;
-
-  player.screen_location = Point(screen_width / 2, screen_height / 2);
-  player.screen_location += Point(1, 1);
   
   timer_level_update.init(update_level, 250, -1);
   timer_level_update.start();
+  
+  timer_level_animate.init(animate_level, 100, -1);
+  timer_level_animate.start();
+
+  new_game(0);
 }
 
 void render(uint32_t time_ms) {
@@ -164,12 +267,19 @@ void render(uint32_t time_ms) {
   level->draw(&screen, Rect(0, 0, screen.bounds.w, screen.bounds.h), level_line_interrupt_callback);
 
   // Draw our character sprite
-  screen.sprite(entityType::PLAYER, player.screen_location);
+  if(!player.dead) {
+    screen.sprite(entityType::PLAYER, player.screen_location);
+  }
 
+  // Draw the header bar
   screen.pen = Pen(255, 255, 255);
   screen.rectangle(Rect(0, 0, screen_width, 10));
   screen.pen = Pen(0, 0, 0);
-  screen.text("Score: " + std::to_string(player.score), minimal_font, Point(1, 1));
+  screen.text("Level: " + std::to_string(player.level) + " Score: " + std::to_string(player.score), minimal_font, Point(2, 2));
+
+  if(player.has_key) {
+    screen.sprite(entityType::KEY_SILVER, Point(screen_width - 10, 1));
+  }
   // screen.text(std::to_string(player.position.x), minimal_font, Point(0, 0));
   // screen.text(std::to_string(player.position.y), minimal_font, Point(0, 10));
 }
@@ -183,48 +293,70 @@ void update(uint32_t time) {
 
   changed = buttons ^ last_buttons;
 
-  if(buttons & changed & Button::DPAD_UP) {
-    movement.y = -1;
-  }
-  if(buttons & changed & Button::DPAD_DOWN) {
-    movement.y = 1;
-  }
-  if(buttons & changed & Button::DPAD_LEFT) {
-    movement.x = -1;
-  }
-  if(buttons & changed & Button::DPAD_RIGHT) {
-    movement.x = 1;
+  if(buttons & changed & Button::B) {
+    new_game(player.level);
   }
 
-  player.position += movement;
-
-  entityType standing_on = level_get(player.position);
-
-  if(standing_on == WALL){
-    player.position -= movement;
-  }
-
-  if(standing_on == ROCK){
-    if(movement.x > 0 && level_get(player.position + Point(1, 0)) == NOTHING){
-      level_set(player.position + Point(1, 0), ROCK);
-      level_set(player.position, NOTHING);
+  if(!player.dead) {
+    if(buttons & changed & Button::DPAD_UP) {
+      movement.y = -1;
     }
-    else if(movement.x < 0 && level_get(player.position + Point(-1, 0)) == NOTHING){
-      level_set(player.position + Point(-1, 0), ROCK);
-      level_set(player.position, NOTHING);
+    if(buttons & changed & Button::DPAD_DOWN) {
+      movement.y = 1;
     }
-    else {
-      player.position -= movement;
+    if(buttons & changed & Button::DPAD_LEFT) {
+      movement.x = -1;
     }
-  }
+    if(buttons & changed & Button::DPAD_RIGHT) {
+      movement.x = 1;
+    }
 
-  if(standing_on == DIAMOND){
-    player.score += 1;
-    level_set(player.position, NOTHING);
-  }
+    player.position += movement;
 
-  if(standing_on == DIRT){
-    level_set(player.position, NOTHING);
+    entityType standing_on = level_get(player.position);
+
+    switch(standing_on) {
+      case WALL:
+        player.position -= movement;
+        break;
+      case ROCK:
+        // Push rocks if there's an empty space the other side of them
+        if(movement.x > 0 && level_get(player.position + Point(1, 0)) == NOTHING){
+          level_set(player.position + Point(1, 0), ROCK);
+          level_set(player.position, NOTHING);
+        }
+        else if(movement.x < 0 && level_get(player.position + Point(-1, 0)) == NOTHING){
+          level_set(player.position + Point(-1, 0), ROCK);
+          level_set(player.position, NOTHING);
+        }
+        else {
+          player.position -= movement;
+        }
+        break;
+      case DIAMOND:
+        // Collect diamonds!
+        player.score += 1;
+        level_set(player.position, NOTHING);
+        break;
+      case DIRT:
+        // Dig dirt!
+        level_set(player.position, DIRT_ANIM_1);
+        break;
+      case KEY_SILVER:
+        player.has_key = true;
+        level_set(player.position, NOTHING);
+        break;
+      case LOCKED_STAIRS:
+        if(player.has_key = true) {
+          level_set(player.position, STAIRS);
+        }
+        player.position -= movement;
+        break;
+      case STAIRS:
+        player.level++;
+        new_game(player.level);
+        break;
+    }
   }
 
   last_buttons = buttons;
