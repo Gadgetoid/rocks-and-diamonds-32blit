@@ -103,8 +103,8 @@ entityType level_get(Point location) {
 
 void update_level(Timer &timer) {
   Point location = Point(0, 0);
-  for(location.x = 0; location.x < level_width; location.x++) {
-    for(location.y = level_height - 1; location.y > 0; location.y--) {
+  for(location.y = level_height - 1; location.y > 0; location.y--) {
+    for(location.x = 0; location.x < level_width; location.x++) {
       Point location_below = location + Point(0, 1);
       entityType current = level_get(location);
       entityType below = level_get(location_below);
@@ -135,11 +135,11 @@ void init() {
   set_screen_mode(ScreenMode::lores);
 
   // Load the spritesheet from the linked binary blob
-  screen.sprites = SpriteSheet::load((const uint8_t *)asset_sprites_png.data);
+  screen.sprites = SpriteSheet::load((const uint8_t *)asset_sprites.data);
 
   // Load the level data from the linked binary blob into memory
   level_data = (uint8_t *)malloc(level_width * level_height);
-  memcpy((void *)level_data, (const void *)asset_level_tmx.data, level_width * level_height);
+  memcpy((void *)level_data, (const void *)asset_level.data, level_width * level_height);
 
   // Load our level data into the TileMap
   level = new TileMap((uint8_t *)level_data, nullptr, Size(level_width, level_height), screen.sprites);
