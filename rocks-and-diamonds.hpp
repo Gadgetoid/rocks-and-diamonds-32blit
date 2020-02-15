@@ -9,4 +9,5 @@ void init();
 void update(uint32_t time);
 void render(uint32_t time);
 
-void update_camera();
+void update_camera(uint32_t time);
+void update_level(uint32_t time);
