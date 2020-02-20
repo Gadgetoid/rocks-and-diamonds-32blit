@@ -107,8 +107,8 @@ void update_camera(uint32_t time) {
 
   if(thunk_a_bunch){
     camera *= Mat3::translation(Vec2(
-      float(random() & 0x03) - 1.5f,
-      float(random() & 0x03) - 1.5f
+      float(blit::random() & 0x03) - 1.5f,
+      float(blit::random() & 0x03) - 1.5f
     ));
     thunk_a_bunch--;
     vibration = thunk_a_bunch / 10.0f;
@@ -225,7 +225,10 @@ void update_level(Timer &timer) {
 
 void new_game(uint32_t level) {
   // Load the level data from the linked binary blob into memory
-  memcpy((void *)level_data, (const void *)asset_level.data, level_width * level_height);
+  //memcpy((void *)level_data, (const void *)asset_level, level_width * level_height);
+  for(auto x = 0; x < 64 * 64; x++){
+    level_data[x] = asset_level[x];
+  }
   player.start = level_first(PLAYER);
   level_set(player.start, NOTHING);
   player.position = player.start;
@@ -242,7 +245,7 @@ void init() {
   set_screen_mode(ScreenMode::lores);
 
   // Load the spritesheet from the linked binary blob
-  screen.sprites = SpriteSheet::load((const uint8_t *)asset_sprites.data);
+  screen.sprites = SpriteSheet::load(asset_sprites);
 
   // Allocate memory for the writeable copy of the level
   level_data = (uint8_t *)malloc(level_width * level_height);
@@ -347,7 +350,7 @@ void update(uint32_t time) {
         level_set(player.position, NOTHING);
         break;
       case LOCKED_STAIRS:
-        if(player.has_key = true) {
+        if(player.has_key) {
           level_set(player.position, STAIRS);
         }
         player.position -= movement;
@@ -355,6 +358,8 @@ void update(uint32_t time) {
       case STAIRS:
         player.level++;
         new_game(player.level);
+        break;
+      default:
         break;
     }
   }
