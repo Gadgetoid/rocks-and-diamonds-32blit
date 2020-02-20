@@ -12,13 +12,15 @@ find_program(
 
 add_custom_command(
     OUTPUT
-        ${CMAKE_SOURCE_DIR}/assets.cpp
-        ${CMAKE_SOURCE_DIR}/assets.hpp
+        ${CMAKE_CURRENT_BINARY_DIR}/assets.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/assets.hpp
    DEPENDS
         ${CMAKE_SOURCE_DIR}/assets.yml
         ${CMAKE_SOURCE_DIR}/assets/sprites.png
         ${CMAKE_SOURCE_DIR}/assets/level.tmx
-    COMMAND cd ${CMAKE_SOURCE_DIR} && ${32BLIT} pack --force --config assets.yml
+    COMMAND cd ${CMAKE_SOURCE_DIR} && ${32BLIT} pack --force --config assets.yml --output ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 blit_executable (rocks-and-diamonds rocks-and-diamonds.cpp assets.cpp)
+
+target_include_directories(rocks-and-diamonds PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
