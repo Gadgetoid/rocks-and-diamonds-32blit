@@ -35,6 +35,7 @@ struct Player {
   uint32_t score;
   Vec2 camera;
   Point size = Point(1, 1);
+  bool facing = true;
   bool has_key;
   uint32_t level;
   bool dead;
@@ -60,6 +61,7 @@ enum entityType {
 
   // Player animations... or lack thereof
   PLAYER = 0x30,
+  PLAYER_FL = 0x31,
   PLAYER_SQUASHED = 0x3e,
   PLAYER_DEAD = 0x3f,
 
@@ -72,6 +74,14 @@ enum entityType {
   DIRT_ANIM_2 = 0x51,
   DIRT_ANIM_3 = 0x52,
   DIRT_ANIM_4 = 0x53,
+
+  // So ugly, oh boy!
+  BOMB_ANIM_1 = 0x60,
+  BOMB_ANIM_2 = 0x61,
+  BOMB_ANIM_3 = 0x62,
+  BOMB_ANIM_4 = 0x63,
+  BOMB_ANIM_5 = 0x64,
+  BOMB_ANIM_6 = 0x65,
 };
 
 // Line-interrupt callback for level->draw that applies our camera transformation
@@ -147,10 +157,20 @@ entityType level_get(Point location) {
   return entity;
 }
 
+void level_set(Point location, entityType entity, bool not_nothing) {
+  if(not_nothing) {
+    if(level_get(location) != NOTHING) {
+      level_set(location, entity);
+    }
+  } else {
+    level_set(location, entity);
+  }
+}
+
 void animate_level(Timer &timer) {
   Point location = Point(0, 0);
-  for(location.y = level_height - 1; location.y > 0; location.y--) {
-    for(location.x = 0; location.x < level_width; location.x++) {
+  for(location.y = level_height - 1; location.y > -1; location.y--) {
+    for(location.x = 0; location.x < level_width + 1; location.x++) {
       Point location_below = location + Point(0, 1);
       entityType current = level_get(location);
 
@@ -162,6 +182,28 @@ void animate_level(Timer &timer) {
         level_set(location, DIRT_ANIM_3);
       } else if(current == DIRT_ANIM_1) {
         level_set(location, DIRT_ANIM_2);
+      }
+
+      if(current == BOMB_ANIM_1) {
+        level_set(location, BOMB_ANIM_2);
+      } else if(current == BOMB_ANIM_2) {
+        level_set(location, BOMB_ANIM_3);
+      } else if(current == BOMB_ANIM_3) {
+        level_set(location, BOMB_ANIM_4);
+      } else if(current == BOMB_ANIM_4) {
+        level_set(location, BOMB_ANIM_5);
+      } else if(current == BOMB_ANIM_5) {
+        level_set(location, BOMB_ANIM_6);
+      } else if(current == BOMB_ANIM_6) {
+        level_set(location, NOTHING);
+        level_set(location + Point(0, 1), DIRT_ANIM_1, true);
+        level_set(location + Point(0, -1), DIRT_ANIM_1, true);
+        level_set(location + Point(1, 0), DIRT_ANIM_1, true);
+        level_set(location + Point(-1, 0), DIRT_ANIM_1, true);
+        level_set(location + Point(1, 1), DIRT_ANIM_1, true);
+        level_set(location + Point(-1, -1), DIRT_ANIM_1, true);
+        level_set(location + Point(-1, 1), DIRT_ANIM_1, true);
+        level_set(location + Point(1, -1), DIRT_ANIM_1, true);
       }
     }
   }
@@ -271,7 +313,7 @@ void render(uint32_t time_ms) {
 
   // Draw our character sprite
   if(!player.dead) {
-    screen.sprite(entityType::PLAYER, player.screen_location);
+    screen.sprite(player.facing ? entityType::PLAYER : entityType::PLAYER_FL, player.screen_location);
   }
 
   // Draw the header bar
@@ -300,6 +342,12 @@ void update(uint32_t time) {
     new_game(player.level);
   }
 
+  if(buttons & changed & Button::A) {
+    if(level_get(player.position + Point(0, 1)) == NOTHING) {
+      level_set(player.position + Point(0, 1), BOMB_ANIM_1);
+    }
+  }
+
   if(!player.dead) {
     if(buttons & changed & Button::DPAD_UP) {
       movement.y = -1;
@@ -308,9 +356,11 @@ void update(uint32_t time) {
       movement.y = 1;
     }
     if(buttons & changed & Button::DPAD_LEFT) {
+      player.facing = false;
       movement.x = -1;
     }
     if(buttons & changed & Button::DPAD_RIGHT) {
+      player.facing = true;
       movement.x = 1;
     }
 
